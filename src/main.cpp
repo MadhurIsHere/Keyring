@@ -71,9 +71,9 @@ SystemState gameBeforeGameOver = STATE_DINO;
 int photoAlbumIndex = 0;
 int homePhotoIndex = 0;
 
-const int TOTAL_ALBUM_PHOTOS = 9;
+const int TOTAL_ALBUM_PHOTOS = 10;
 
-// Home photo mode: 0..8 = fixed photo, 9 = Photo of the Day
+// Home photo mode: 0..9 = fixed photo, 10 = Photo of the Day
 const int HOME_MODE_DAILY = TOTAL_ALBUM_PHOTOS;
 long lastKnownDay = -1;
 
@@ -101,7 +101,8 @@ const unsigned char* albumBitmaps[TOTAL_ALBUM_PHOTOS] = {
   bitmap_deer_128x64,
   bitmap_cafe_128x64,
   bitmap_mountain_128x64,
-  bitmap_fireworks_128x64
+  bitmap_fireworks_128x64,
+  bitmap_festive_128x64
 };
 
 const unsigned char* homeBitmaps[TOTAL_ALBUM_PHOTOS] = {
@@ -113,7 +114,8 @@ const unsigned char* homeBitmaps[TOTAL_ALBUM_PHOTOS] = {
   bitmap_deer_64x64,
   bitmap_cafe_64x64,
   bitmap_mountain_64x64,
-  bitmap_fireworks_64x64
+  bitmap_fireworks_64x64,
+  bitmap_festive_64x64
 };
 
 const char* photoTitles[TOTAL_ALBUM_PHOTOS] = {
@@ -125,7 +127,8 @@ const char* photoTitles[TOTAL_ALBUM_PHOTOS] = {
   "Deer Park",
   "Cafe Friends",
   "Mountain View",
-  "Fireworks Smile"
+  "Fireworks Smile",
+  "Festive Friends"
 };
 
 // Button state tracking
@@ -142,7 +145,7 @@ const char* menuItems[] = {
   "2. Flappy Balloon",
   "3. Classic Snake",
   "4. Live Clock...",
-  "5. Photo Album (9)",
+  "5. Photo Album (10)",
   "6. Home Pic Mode",
   "< Back to Home"
 };
@@ -284,30 +287,30 @@ void drawSecretPage() {
 // 25 SHORT, NON-ROMANTIC PERSONALIZED MESSAGES
 // ==========================================
 const char* shreyaMessages[] = {
-  "You're pure magic,\nShreya! ✨",
+  "You're pure magic,\nShreya! :)",
   "Keep shining,\nyou rock!",
   "Remember: you can\ndo anything!",
   "Happy Birthday to\nmy favorite buddy!",
   "Smile! It suits\nyou best :)",
   "You're certified\nadorable trouble!",
   "If you were a veg,\na cute-cumber!",
-  "May all your wishes\ncome true! 🎂",
-  "You bring so much\nsunshine! ☀️",
+  "May all wishes\ncome true today!",
+  "You bring so much\nsunshine! :)",
   "Keep doing\namazing things!",
   "Take a breath:\nyou've got this!",
   "Daily reminder:\nYou are awesome!",
-  "Life is better with\nbirthday cake! 🍰",
+  "Life is better\nwith birthday cake",
   "You have the\nbest smile ever!",
   "Hope your day is\nsuper wonderful!",
-  "Stay awesome,\nstay you! ✨",
-  "High fives and\nbig cheers! 🎉",
-  "You deserve all the\nhappiness today!",
-  "Eat extra cake,\nDoctor's orders! 🍰",
+  "Stay awesome,\nstay you! :)",
+  "High fives and\nbig cheers! :)",
+  "You deserve all\nhappiness today!",
+  "Eat extra cake,\nDoctor's orders!",
   "You light up every\nroom you enter!",
   "Keep your head up,\nyour crown shines!",
   "Never forget:\nYou rock always!",
   "Sending infinite\nsmiles today! :)",
-  "Best adventure\nbuddy ever! 🌟",
+  "Best adventure\nbuddy ever!",
   "You make the world\na happier place!"
 };
 const int TOTAL_MESSAGES = 25;
@@ -477,19 +480,24 @@ void enterDeepSleep() {
   display.setTextColor(SSD1306_WHITE);
 
   // Cute sleeping chibi face ( - ω - )
+  // Cat ears on top
+  display.fillTriangle(34, 12, 44, 12, 39, 4, SSD1306_WHITE);
+  display.fillTriangle(84, 12, 94, 12, 89, 4, SSD1306_WHITE);
+  display.drawPixel(39, 8, SSD1306_BLACK);
+  display.drawPixel(89, 8, SSD1306_BLACK);
+
   display.drawFastHLine(36, 18, 14, SSD1306_WHITE);
   display.drawFastHLine(78, 18, 14, SSD1306_WHITE);
   // Blushing cheeks
-  display.drawLine(30, 24, 33, 21, SSD1306_WHITE);
-  display.drawLine(32, 24, 35, 21, SSD1306_WHITE);
-  display.drawLine(93, 24, 96, 21, SSD1306_WHITE);
-  display.drawLine(95, 24, 98, 21, SSD1306_WHITE);
-  // Cute cat mouth :3
-  display.drawPixel(61, 23, SSD1306_WHITE);
-  display.drawFastHLine(62, 24, 2, SSD1306_WHITE);
-  display.drawPixel(64, 23, SSD1306_WHITE);
-  display.drawFastHLine(65, 24, 2, SSD1306_WHITE);
-  display.drawPixel(67, 23, SSD1306_WHITE);
+  display.drawLine(40, 24, 43, 21, SSD1306_WHITE);
+  display.drawLine(42, 24, 45, 21, SSD1306_WHITE);
+  display.drawLine(83, 24, 86, 21, SSD1306_WHITE);
+  display.drawLine(85, 24, 88, 21, SSD1306_WHITE);
+  // Cute cat mouth ( ω )
+  display.drawLine(60, 22, 62, 24, SSD1306_WHITE);
+  display.drawLine(62, 24, 64, 22, SSD1306_WHITE);
+  display.drawLine(64, 22, 66, 24, SSD1306_WHITE);
+  display.drawLine(66, 24, 68, 22, SSD1306_WHITE);
 
   display.setCursor(32, 38);
   display.print("SEE YOU AI");
@@ -526,22 +534,28 @@ void drawBlinkingCuteFace(int centerX, int centerY, int faceType) {
     faceBlinking = false;
   }
 
-  // Cute blushing whiskers / cheeks on all faces
-  display.drawLine(centerX - 24, centerY + 3, centerX - 21, centerY, SSD1306_WHITE);
-  display.drawLine(centerX - 22, centerY + 3, centerX - 19, centerY, SSD1306_WHITE);
-  display.drawLine(centerX + 19, centerY + 3, centerX + 22, centerY, SSD1306_WHITE);
-  display.drawLine(centerX + 21, centerY + 3, centerX + 24, centerY, SSD1306_WHITE);
+  // 1. Cute Cat / Bear Ears on top
+  display.fillTriangle(centerX - 18, centerY - 6, centerX - 10, centerY - 6, centerX - 14, centerY - 12, SSD1306_WHITE);
+  display.fillTriangle(centerX + 10, centerY - 6, centerX + 18, centerY - 6, centerX + 14, centerY - 12, SSD1306_WHITE);
+  display.drawPixel(centerX - 14, centerY - 8, SSD1306_BLACK);
+  display.drawPixel(centerX + 14, centerY - 8, SSD1306_BLACK);
+
+  // 2. Cute blushing cheeks right under the eyes ( // flush marks )
+  display.drawLine(centerX - 17, centerY + 4, centerX - 15, centerY + 2, SSD1306_WHITE);
+  display.drawLine(centerX - 14, centerY + 4, centerX - 12, centerY + 2, SSD1306_WHITE);
+  display.drawLine(centerX + 12, centerY + 4, centerX + 14, centerY + 2, SSD1306_WHITE);
+  display.drawLine(centerX + 15, centerY + 4, centerX + 17, centerY + 2, SSD1306_WHITE);
 
   if (faceBlinking) {
-    // Closed happy blinking curves > <
-    display.drawLine(centerX - 18, centerY - 2, centerX - 12, centerY + 1, SSD1306_WHITE);
-    display.drawLine(centerX - 18, centerY + 4, centerX - 12, centerY + 1, SSD1306_WHITE);
-    display.drawLine(centerX + 18, centerY - 2, centerX + 12, centerY + 1, SSD1306_WHITE);
-    display.drawLine(centerX + 18, centerY + 4, centerX + 12, centerY + 1, SSD1306_WHITE);
+    // Closed happy blinking curves ^ ^
+    display.drawLine(centerX - 17, centerY + 1, centerX - 13, centerY - 2, SSD1306_WHITE);
+    display.drawLine(centerX - 13, centerY - 2, centerX - 9, centerY + 1, SSD1306_WHITE);
+    display.drawLine(centerX + 9, centerY + 1, centerX + 13, centerY - 2, SSD1306_WHITE);
+    display.drawLine(centerX + 13, centerY - 2, centerX + 17, centerY + 1, SSD1306_WHITE);
   } else {
     if (faceType % 3 == 0) {
       // 1. Big Sparkly Chibi Anime Eyes ( ◕ ω ◕ )
-      for (int ex : {centerX - 14, centerX + 14}) {
+      for (int ex : {centerX - 13, centerX + 13}) {
         display.fillCircle(ex, centerY, 5, SSD1306_WHITE);
         display.drawPixel(ex - 2, centerY - 2, SSD1306_BLACK);
         display.drawPixel(ex - 1, centerY - 2, SSD1306_BLACK);
@@ -550,7 +564,7 @@ void drawBlinkingCuteFace(int centerX, int centerY, int faceType) {
       }
     } else if (faceType % 3 == 1) {
       // 2. Loving Heart Eyes ( ♡ ω ♡ )
-      int hx1 = centerX - 15, hx2 = centerX + 15;
+      int hx1 = centerX - 14, hx2 = centerX + 14;
       display.fillCircle(hx1 - 3, centerY - 2, 3, SSD1306_WHITE);
       display.fillCircle(hx1 + 3, centerY - 2, 3, SSD1306_WHITE);
       display.fillTriangle(hx1 - 6, centerY, hx1 + 6, centerY, hx1, centerY + 6, SSD1306_WHITE);
@@ -559,29 +573,28 @@ void drawBlinkingCuteFace(int centerX, int centerY, int faceType) {
       display.fillCircle(hx2 + 3, centerY - 2, 3, SSD1306_WHITE);
       display.fillTriangle(hx2 - 6, centerY, hx2 + 6, centerY, hx2, centerY + 6, SSD1306_WHITE);
     } else {
-      // 3. Playful Starry Wink ( > ‿ ◕ ) ✨
-      display.drawLine(centerX - 18, centerY - 2, centerX - 12, centerY + 1, SSD1306_WHITE);
-      display.drawLine(centerX - 18, centerY + 4, centerX - 12, centerY + 1, SSD1306_WHITE);
+      // 3. Playful Starry Wink ( > ‿ ◕ )
+      display.drawLine(centerX - 17, centerY - 2, centerX - 11, centerY, SSD1306_WHITE);
+      display.drawLine(centerX - 17, centerY + 2, centerX - 11, centerY, SSD1306_WHITE);
 
-      display.fillCircle(centerX + 14, centerY, 5, SSD1306_WHITE);
+      display.fillCircle(centerX + 13, centerY, 5, SSD1306_WHITE);
+      display.drawPixel(centerX + 11, centerY - 2, SSD1306_BLACK);
       display.drawPixel(centerX + 12, centerY - 2, SSD1306_BLACK);
-      display.drawPixel(centerX + 13, centerY - 2, SSD1306_BLACK);
-      display.drawPixel(centerX + 12, centerY - 1, SSD1306_BLACK);
-      display.drawPixel(centerX + 16, centerY + 2, SSD1306_BLACK);
+      display.drawPixel(centerX + 11, centerY - 1, SSD1306_BLACK);
+      display.drawPixel(centerX + 15, centerY + 2, SSD1306_BLACK);
 
       // Star sparkle next to wink
-      display.drawPixel(centerX - 24, centerY - 3, SSD1306_WHITE);
-      display.drawLine(centerX - 25, centerY - 4, centerX - 23, centerY - 4, SSD1306_WHITE);
-      display.drawLine(centerX - 24, centerY - 5, centerX - 24, centerY - 3, SSD1306_WHITE);
+      display.drawPixel(centerX - 21, centerY - 2, SSD1306_WHITE);
+      display.drawLine(centerX - 22, centerY - 2, centerX - 20, centerY - 2, SSD1306_WHITE);
+      display.drawLine(centerX - 21, centerY - 3, centerX - 21, centerY - 1, SSD1306_WHITE);
     }
   }
 
-  // Adorable :3 kitten mouth
-  display.drawPixel(centerX - 4, centerY + 4, SSD1306_WHITE);
-  display.drawFastHLine(centerX - 3, centerY + 5, 2, SSD1306_WHITE);
-  display.drawPixel(centerX, centerY + 4, SSD1306_WHITE);
-  display.drawFastHLine(centerX + 1, centerY + 5, 2, SSD1306_WHITE);
-  display.drawPixel(centerX + 4, centerY + 4, SSD1306_WHITE);
+  // 3. Adorable kitten mouth ( ω )
+  display.drawLine(centerX - 4, centerY + 3, centerX - 2, centerY + 5, SSD1306_WHITE);
+  display.drawLine(centerX - 2, centerY + 5, centerX, centerY + 3, SSD1306_WHITE);
+  display.drawLine(centerX, centerY + 3, centerX + 2, centerY + 5, SSD1306_WHITE);
+  display.drawLine(centerX + 2, centerY + 5, centerX + 4, centerY + 3, SSD1306_WHITE);
 }
 
 // ==========================================
@@ -692,7 +705,7 @@ void drawPhotoAlbum() {
     display.print(">");
   }
   display.setCursor(55, 54);
-  display.print(String(photoAlbumIndex + 1) + "/9");
+  display.print(String(photoAlbumIndex + 1) + "/" + String(TOTAL_ALBUM_PHOTOS));
   display.setCursor(80, 54);
   display.print("B2:Next");
 
