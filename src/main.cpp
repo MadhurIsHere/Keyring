@@ -769,93 +769,123 @@ void drawPhotoAlbum(bool push = true) {
 // ==========================================
 // 4. LIVE REAL-WORLD CLOCK & WEATHER
 // ==========================================
+void drawWeatherIcon(int x, int y, int code, bool night) {
+  unsigned long ms = millis();
+
+  if (code <= 1) {
+    if (night) {
+      // Crescent moon + twinkling star
+      display.fillCircle(x + 8, y + 8, 6, SSD1306_WHITE);
+      display.fillCircle(x + 11, y + 6, 5, SSD1306_BLACK);
+      if ((ms / 500) % 2) display.drawPixel(x + 14, y + 2, SSD1306_WHITE);
+      display.drawPixel(x + 13, y + 12, SSD1306_WHITE);
+    } else {
+      // Sun with slowly rotating rays
+      display.fillCircle(x + 8, y + 8, 4, SSD1306_WHITE);
+      float rot = ms / 1500.0f;
+      for (int k = 0; k < 8; k++) {
+        float a = rot + k * 0.7854f;
+        display.drawLine(x + 8 + (int)(6 * cosf(a)), y + 8 + (int)(6 * sinf(a)),
+                         x + 8 + (int)(8 * cosf(a)), y + 8 + (int)(8 * sinf(a)), SSD1306_WHITE);
+      }
+    }
+    return;
+  }
+
+  bool rain = (code >= 51 && code <= 67) || (code >= 80 && code <= 82) || code >= 95;
+  bool snow = (code >= 71 && code <= 77) || code == 85 || code == 86;
+  int cy = (rain || snow) ? y - 1 : y + 1;
+
+  // Cloud
+  display.fillCircle(x + 5, cy + 10, 4, SSD1306_WHITE);
+  display.fillCircle(x + 10, cy + 7, 5, SSD1306_WHITE);
+  display.fillCircle(x + 13, cy + 11, 3, SSD1306_WHITE);
+  display.fillRect(x + 5, cy + 11, 9, 4, SSD1306_WHITE);
+
+  // Falling drops / flakes
+  for (int i = 0; i < 3; i++) {
+    int dx = x + 4 + i * 4;
+    int off = (int)((ms / 150 + i * 2) % 4);
+    if (rain) display.drawLine(dx, y + 14 + off, dx, y + 15 + off, SSD1306_WHITE);
+    else if (snow) display.drawPixel(dx, y + 14 + off, SSD1306_WHITE);
+  }
+}
+
+const char* weatherWord(int code) {
+  if (code <= 1) return "Sunny";
+  if (code == 2) return "P.Cloudy";
+  if (code == 45 || code == 48) return "Foggy";
+  if ((code >= 71 && code <= 77) || code == 85 || code == 86) return "Snowy";
+  if (code >= 95) return "Stormy";
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return "Rainy";
+  return "Cloudy";
+}
+
 void drawClockWeather() {
   display.clearDisplay();
-
-  // Header
-  display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
 
-  // Time
-  struct tm timeinfo;
-  bool gotTime = getLocalTime(&timeinfo, 50);
+  time_t nowT = time(nullptr);
+  bool synced = nowT > 1700000000L;        // true once NTP has set the clock
+  struct tm tm;
+  localtime_r(&nowT, &tm);
 
-  if (gotTime) {
-    char timeStr[10];
-    strftime(timeStr, sizeof(timeStr), "%I:%M %p", &timeinfo);
-    display.setTextSize(2);
-    display.setCursor(18, 6);
-    display.print(timeStr);
+  // ---- Big time ----
+  int h24 = tm.tm_hour;
+  int h12 = h24 % 12;
+  if (h12 == 0) h12 = 12;
 
-    char dateStr[20];
-    strftime(dateStr, sizeof(dateStr), "%a, %d %b", &timeinfo);
-    display.setTextSize(1);
-    display.setCursor(30, 26);
-    display.print(dateStr);
-  } else {
-    // Offline / running timer
-    unsigned long secs = millis() / 1000;
-    int mins = (secs / 60) % 60;
-    int hrs = (secs / 3600) % 24;
-    display.setTextSize(2);
-    display.setCursor(24, 6);
-    if (hrs < 10) display.print("0");
-    display.print(hrs);
-    display.print(":");
-    if (mins < 10) display.print("0");
-    display.print(mins);
+  char tbuf[8];
+  if (synced) snprintf(tbuf, sizeof(tbuf), "%d%c%02d", h12, (tm.tm_sec % 2) ? ' ' : ':', tm.tm_min);
+  else        snprintf(tbuf, sizeof(tbuf), "--:--");
 
-    display.setTextSize(1);
-    display.setCursor(24, 26);
-    display.print("(Offline Clock)");
-  }
+  int tw = strlen(tbuf) * 18;              // size-3 glyph = 18 px wide
+  int x0 = (128 - (tw + 4 + 12)) / 2;      // centre time + AM/PM together
+  display.setTextSize(3);
+  display.setCursor(x0, 3);
+  display.print(tbuf);
 
-  // Weather & Animated Buddy Accessories at bottom
-  display.drawFastHLine(0, 36, 128, SSD1306_WHITE);
-
-  // Left: Buddy Face
-  int bx = 16, by = 40;
-  display.fillRoundRect(bx, by, 10, 9, 2, SSD1306_WHITE);
-  display.fillRoundRect(bx + 12, by, 10, 9, 2, SSD1306_WHITE);
-  display.fillCircle(bx + 5, by + 4, 2, SSD1306_BLACK);
-  display.fillCircle(bx + 17, by + 4, 2, SSD1306_BLACK);
-
-  // Sunglasses if Sunny / Clear (Code 0, 1)
-  if (currentWeatherCode <= 2) {
-    display.fillRect(bx - 1, by + 1, 24, 4, SSD1306_BLACK);
-    display.drawRect(bx - 1, by + 1, 24, 4, SSD1306_WHITE);
-    display.drawFastHLine(bx + 9, by + 3, 4, SSD1306_WHITE); // bridge
-  }
-  // Umbrella if Rain (Code >= 50)
-  else if (currentWeatherCode >= 50) {
-    display.drawCircleHelper(bx + 26, by, 7, 1 | 2, SSD1306_WHITE);
-    display.drawFastVLine(bx + 26, by, 9, SSD1306_WHITE); // handle
-  }
-
-  // Right: Temperature and status
   display.setTextSize(1);
-  display.setCursor(44, 40);
-  if (WiFi.status() == WL_CONNECTED) {
-    if (weatherUpdated) {
-      display.print((int)currentTemp);
-      display.print("C ");
-      if (currentWeatherCode <= 2) display.print("Sunny!");
-      else if (currentWeatherCode >= 50) display.print("Rainy!");
-      else display.print("Cloudy");
-    } else {
-      display.print("Syncing...");
-    }
-  } else {
-    display.print("WiFi: Offline");
+  if (synced) {
+    display.setCursor(x0 + tw + 4, 19);
+    display.print(h24 >= 12 ? "PM" : "AM");
   }
 
-  // Bottom prompt bar: Button 1 on LEFT, Button 2 on RIGHT
-  display.fillRect(0, 52, 128, 12, SSD1306_BLACK);
-  display.drawFastHLine(0, 52, 128, SSD1306_WHITE);
-  display.setCursor(4, 54);
-  display.print("B1:Menu");
-  display.setCursor(64, 54);
-  display.print("B2:Connect");
+  // ---- Date line ----
+  char dbuf[24];
+  if (synced) strftime(dbuf, sizeof(dbuf), "%a, %d %b", &tm);
+  else        snprintf(dbuf, sizeof(dbuf), "Press B2 to set time");
+  display.setCursor((128 - (int)strlen(dbuf) * 6) / 2, 31);
+  display.print(dbuf);
+
+  // ---- Divider with seconds progress ----
+  display.drawFastHLine(0, 41, 128, SSD1306_WHITE);
+  if (synced) display.drawFastHLine(0, 42, (tm.tm_sec * 128) / 60, SSD1306_WHITE);
+
+  // ---- Weather row ----
+  bool night = synced && (h24 >= 19 || h24 < 6);
+  drawWeatherIcon(6, 46, weatherUpdated ? currentWeatherCode : 3, night);
+
+  // Temperature
+  char tmp[8];
+  if (weatherUpdated) snprintf(tmp, sizeof(tmp), "%d", (int)roundf(currentTemp));
+  else                snprintf(tmp, sizeof(tmp), "--");
+  display.setTextSize(2);
+  display.setCursor(30, 47);
+  display.print(tmp);
+  int tx = 30 + (int)strlen(tmp) * 12;
+  display.drawCircle(tx + 2, 49, 1, SSD1306_WHITE);   // degree sign
+  display.setTextSize(1);
+  display.setCursor(tx + 6, 47);
+  display.print("C");
+
+  // Side column: condition + hint
+  display.setCursor(78, 46);
+  if (weatherUpdated) display.print(night && currentWeatherCode <= 1 ? "Clear" : weatherWord(currentWeatherCode));
+  else if (WiFi.status() == WL_CONNECTED) display.print("Syncing");
+  else display.print("No WiFi");
+  display.setCursor(78, 56);
+  display.print("B2:Sync");
 
   display.display();
 }
@@ -939,18 +969,48 @@ void showGameOver(int score, int best) {
 }
 
 // ==========================================
-// GAME 1: SHREYA RUN (AVATAR RUNNER)
 // ==========================================
+// GAME 1: SHREYA RUN (EASY MODE)
+// ==========================================
+// ---- TUNING (raise speeds / lower lives to make it harder) ----
+const float DINO_START_SPEED = 2.6f;
+const float DINO_MAX_SPEED   = 4.2f;
+const float DINO_JUMP_V      = 6.0f;
+const float DINO_GRAVITY     = 0.45f;
+const int   START_LIVES      = 3;
+
+// Shared by Dino and Flappy
+int lives = START_LIVES;
+unsigned long invulnUntil = 0;
+
+void drawMiniHeart(int x, int y) {
+  display.drawPixel(x + 1, y, SSD1306_WHITE);
+  display.drawPixel(x + 3, y, SSD1306_WHITE);
+  display.drawFastHLine(x, y + 1, 5, SSD1306_WHITE);
+  display.drawFastHLine(x + 1, y + 2, 3, SSD1306_WHITE);
+  display.drawPixel(x + 2, y + 3, SSD1306_WHITE);
+}
+
+void drawLives(int x, int y) {
+  for (int i = 0; i < lives; i++) drawMiniHeart(x + i * 7, y);
+}
+
 float dinoY = 44;
 float dinoVY = 0;
 bool dinoJumping = false;
-int cactusX1 = 130, cactusW1 = 6, cactusH1 = 12;
-int cactusX2 = 200, cactusW2 = 8, cactusH2 = 14;
-float dinoSpeed = 3.5;
+float cactusX1 = 130, cactusX2 = 260;
+int cactusW1 = 6, cactusH1 = 12;
+int cactusW2 = 8, cactusH2 = 14;
+float dinoSpeed = DINO_START_SPEED;
 
 void initDino() {
   dinoY = 44; dinoVY = 0; dinoJumping = false;
-  cactusX1 = 130; cactusX2 = 205; dinoSpeed = 3.5; currentScore = 0;
+  dinoSpeed = DINO_START_SPEED;
+  cactusX1 = 130;
+  cactusX2 = 130 + DINO_START_SPEED * (2.0f * DINO_JUMP_V / DINO_GRAVITY) + 50;
+  currentScore = 0;
+  lives = START_LIVES;
+  invulnUntil = 0;
 }
 
 void drawShreyaRunner(int x, int y, bool jumping, int frame) {
@@ -978,161 +1038,276 @@ void drawShreyaRunner(int x, int y, bool jumping, int frame) {
 }
 
 void updateDino() {
+  unsigned long now = millis();
+
+  // Jump
   if (digitalRead(BUTTON_MODE) == LOW && !dinoJumping) {
-    dinoVY = -6.2; dinoJumping = true;
+    dinoVY = -DINO_JUMP_V;
+    dinoJumping = true;
   }
-  dinoY += dinoVY; dinoVY += 0.55;
+  dinoY += dinoVY;
+  dinoVY += DINO_GRAVITY;
   if (dinoY >= 44) { dinoY = 44; dinoVY = 0; dinoJumping = false; }
 
-  cactusX1 -= (int)dinoSpeed; cactusX2 -= (int)dinoSpeed;
-  if (cactusX1 < -10) { cactusX1 = 130 + random(0, 40); cactusH1 = random(10, 16); currentScore++; }
-  if (cactusX2 < -10) { cactusX2 = cactusX1 + 70 + random(20, 60); cactusH2 = random(10, 16); currentScore++; }
-  dinoSpeed = 3.5 + (currentScore / 15.0);
+  // Slow ramp-up, capped
+  dinoSpeed = min(DINO_MAX_SPEED, DINO_START_SPEED + currentScore * 0.04f);
+  cactusX1 -= dinoSpeed;
+  cactusX2 -= dinoSpeed;
 
-  int dinoBoxL = 16, dinoBoxR = 26, dinoBoxT = (int)dinoY, dinoBoxB = (int)dinoY + 14;
-  bool hit1 = !(dinoBoxR < cactusX1 || dinoBoxL > cactusX1 + cactusW1 || dinoBoxB < 56 - cactusH1);
-  bool hit2 = !(dinoBoxR < cactusX2 || dinoBoxL > cactusX2 + cactusW2 || dinoBoxB < 56 - cactusH2);
+  // Spacing is always longer than one full jump, so every pattern is beatable
+  float airFrames = 2.0f * DINO_JUMP_V / DINO_GRAVITY;
+  float minGap = dinoSpeed * airFrames + 30;
+  if (cactusX1 < -10) {
+    cactusX1 = max(cactusX2 + minGap, 130.0f) + random(0, 40);
+    cactusH1 = random(10, 16);
+    currentScore++;
+  }
+  if (cactusX2 < -10) {
+    cactusX2 = max(cactusX1 + minGap, 130.0f) + random(0, 40);
+    cactusH2 = random(10, 16);
+    currentScore++;
+  }
 
-  if (hit1 || hit2) {
-    if (currentScore > bestDino) { bestDino = currentScore; saveScore("dino", bestDino); }
-    gameBeforeGameOver = STATE_DINO; currentState = STATE_GAMEOVER; return;
+  // Forgiving hitbox: narrower than the sprite, 3 px grace on the cactus top
+  int boxL = 18, boxR = 23;
+  int feet = (int)dinoY + 12;
+  bool hit1 = !(boxR < cactusX1 || boxL > cactusX1 + cactusW1 || feet < 56 - cactusH1 + 3);
+  bool hit2 = !(boxR < cactusX2 || boxL > cactusX2 + cactusW2 || feet < 56 - cactusH2 + 3);
+
+  bool invuln = now < invulnUntil;
+  if ((hit1 || hit2) && !invuln) {
+    lives--;
+    invulnUntil = now + 1500;
+    if (lives <= 0) {
+      if (currentScore > bestDino) { bestDino = currentScore; saveScore("dino", bestDino); }
+      gameBeforeGameOver = STATE_DINO; currentState = STATE_GAMEOVER; return;
+    }
   }
 
   display.clearDisplay();
   display.drawFastHLine(0, 56, 128, SSD1306_WHITE);
 
-  // Draw custom Shreya Runner!
-  int runFrame = ((millis() / 80) % 2);
-  drawShreyaRunner(16, (int)dinoY, dinoJumping, runFrame);
+  // Blink while invulnerable after a hit
+  if (!(invuln && ((now / 100) % 2))) {
+    int runFrame = ((now / 80) % 2);
+    drawShreyaRunner(16, (int)dinoY, dinoJumping, runFrame);
+  }
 
-  display.fillRect(cactusX1, 56 - cactusH1, cactusW1, cactusH1, SSD1306_WHITE);
-  display.fillRect(cactusX2, 56 - cactusH2, cactusW2, cactusH2, SSD1306_WHITE);
+  display.fillRect((int)cactusX1, 56 - cactusH1, cactusW1, cactusH1, SSD1306_WHITE);
+  display.fillRect((int)cactusX2, 56 - cactusH2, cactusW2, cactusH2, SSD1306_WHITE);
 
-  display.setTextSize(1); display.setTextColor(SSD1306_WHITE); display.setCursor(75, 4);
-  display.print("SCR:"); display.print(currentScore);
+  drawLives(4, 4);
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(75, 4);
+  display.print("SCR:");
+  display.print(currentScore);
   display.display();
 }
 
 // ==========================================
-// GAME 2: FLAPPY BALLOON (DODGING CANDLES)
+// GAME 2: FLAPPY BALLOON (EASY MODE)
 // ==========================================
-float flappyY = 28; float flappyVY = 0;
-int candleX[2]; int candleGapY[2]; const int candleW = 12; const int gapH = 26;
+// ---- TUNING ----
+const int   gapH            = 38;     // was 26
+const int   FLAPPY_SPACING  = 100;    // distance between candles
+const float FLAPPY_SPEED    = 1.7f;   // was 2.0 and effectively faster
+const float FLAP_POWER      = 2.4f;   // was 3.2
+const float FLAP_GRAVITY    = 0.28f;  // was 0.38
+
+float flappyY = 24; float flappyVY = 0;
+float candleX[2]; int candleGapY[2]; bool candleScored[2];
+const int candleW = 12;
 
 void initFlappy() {
-  flappyY = 28; flappyVY = 0;
-  candleX[0] = 130; candleGapY[0] = random(12, 32);
-  candleX[1] = 130 + 75; candleGapY[1] = random(12, 32); currentScore = 0;
+  flappyY = 24; flappyVY = 0;
+  candleX[0] = 190;
+  candleX[1] = 190 + FLAPPY_SPACING;
+  for (int i = 0; i < 2; i++) {
+    candleGapY[i] = random(8, 23);
+    candleScored[i] = false;
+  }
+  currentScore = 0;
+  lives = START_LIVES;
+  invulnUntil = 0;
 }
 
 void updateFlappy() {
-  if (digitalRead(BUTTON_MODE) == LOW) flappyVY = -3.2;
-  flappyY += flappyVY; flappyVY += 0.38;
+  unsigned long now = millis();
 
+  if (digitalRead(BUTTON_MODE) == LOW) flappyVY = -FLAP_POWER;
+  flappyY += flappyVY;
+  flappyVY += FLAP_GRAVITY;
+  if (flappyVY > 3.0f) flappyVY = 3.0f;               // terminal velocity
+
+  // Floor and ceiling just stop you (no more instant game over)
+  if (flappyY < 0)  { flappyY = 0;  flappyVY = 0; }
+  if (flappyY > 48) { flappyY = 48; flappyVY = 0; }
+
+  bool hit = false;
   for (int i = 0; i < 2; i++) {
-    candleX[i] -= 2;
-    if (candleX[i] + candleW == 24) currentScore++;
-    if (candleX[i] < -candleW) { candleX[i] = 130; candleGapY[i] = random(10, 32); }
+    candleX[i] -= FLAPPY_SPEED;
+
+    // Score once when the candle fully passes the balloon
+    if (!candleScored[i] && candleX[i] + candleW < 24) {
+      candleScored[i] = true;
+      currentScore++;
+    }
+    // Respawn with a fixed spacing from the other candle
+    if (candleX[i] < -candleW) {
+      candleX[i] = max(candleX[1 - i] + FLAPPY_SPACING, 130.0f);
+      candleGapY[i] = random(8, 23);
+      candleScored[i] = false;
+    }
+    // Collision (slightly smaller than the sprite)
+    if (25 + 7 > candleX[i] && 25 < candleX[i] + candleW) {
+      if (flappyY + 2 < candleGapY[i] || flappyY + 12 > candleGapY[i] + gapH) hit = true;
+    }
   }
 
-  if (flappyY < 0 || flappyY > 54) {
-    if (currentScore > bestFlappy) { bestFlappy = currentScore; saveScore("flappy", bestFlappy); }
-    gameBeforeGameOver = STATE_FLAPPY; currentState = STATE_GAMEOVER; return;
-  }
-
-  for (int i = 0; i < 2; i++) {
-    if (24 + 10 > candleX[i] && 24 < candleX[i] + candleW) {
-      if (flappyY < candleGapY[i] || flappyY + 12 > candleGapY[i] + gapH) {
-        if (currentScore > bestFlappy) { bestFlappy = currentScore; saveScore("flappy", bestFlappy); }
-        gameBeforeGameOver = STATE_FLAPPY; currentState = STATE_GAMEOVER; return;
-      }
+  bool invuln = now < invulnUntil;
+  if (hit && !invuln) {
+    lives--;
+    invulnUntil = now + 1500;
+    if (lives <= 0) {
+      if (currentScore > bestFlappy) { bestFlappy = currentScore; saveScore("flappy", bestFlappy); }
+      gameBeforeGameOver = STATE_FLAPPY; currentState = STATE_GAMEOVER; return;
     }
   }
 
   display.clearDisplay();
 
-  // Draw Birthday Candles with Flickering Flames!
+  // Birthday candles with flickering flames
   for (int i = 0; i < 2; i++) {
+    int cx = (int)candleX[i];
+    int gy = candleGapY[i];
+
     // Top candle
-    display.fillRect(candleX[i], 0, candleW, candleGapY[i] - 4, SSD1306_WHITE);
-    display.drawLine(candleX[i] + candleW/2, candleGapY[i] - 4, candleX[i] + candleW/2, candleGapY[i] - 2, SSD1306_WHITE);
-    // Flickering flame top
-    if ((millis() / 100) % 2 == 0) {
-      display.fillCircle(candleX[i] + candleW/2, candleGapY[i] - 1, 2, SSD1306_WHITE);
-    } else {
-      display.drawPixel(candleX[i] + candleW/2, candleGapY[i] - 1, SSD1306_WHITE);
-    }
+    display.fillRect(cx, 0, candleW, gy - 4, SSD1306_WHITE);
+    display.drawLine(cx + candleW / 2, gy - 4, cx + candleW / 2, gy - 2, SSD1306_WHITE);
+    if ((now / 100) % 2 == 0) display.fillCircle(cx + candleW / 2, gy - 1, 2, SSD1306_WHITE);
+    else                      display.drawPixel(cx + candleW / 2, gy - 1, SSD1306_WHITE);
 
     // Bottom candle
-    int by = candleGapY[i] + gapH;
-    display.fillRect(candleX[i], by + 4, candleW, 64 - (by + 4), SSD1306_WHITE);
-    display.drawLine(candleX[i] + candleW/2, by + 2, candleX[i] + candleW/2, by + 4, SSD1306_WHITE);
-    // Flickering flame bottom
-    if ((millis() / 120) % 2 == 0) {
-      display.fillCircle(candleX[i] + candleW/2, by + 1, 2, SSD1306_WHITE);
-    } else {
-      display.drawPixel(candleX[i] + candleW/2, by + 1, SSD1306_WHITE);
-    }
+    int by = gy + gapH;
+    display.fillRect(cx, by + 4, candleW, 64 - (by + 4), SSD1306_WHITE);
+    display.drawLine(cx + candleW / 2, by + 2, cx + candleW / 2, by + 4, SSD1306_WHITE);
+    if ((now / 120) % 2 == 0) display.fillCircle(cx + candleW / 2, by + 1, 2, SSD1306_WHITE);
+    else                      display.drawPixel(cx + candleW / 2, by + 1, SSD1306_WHITE);
   }
 
-  // Draw Flying Birthday Balloon with Shreya hanging on!
-  int bx = 24, by = (int)flappyY;
-  display.fillCircle(bx + 4, by + 4, 4, SSD1306_WHITE); // Balloon
-  display.drawPixel(bx + 3, by + 2, SSD1306_BLACK);     // Highlight
-  display.drawFastVLine(bx + 4, by + 8, 4, SSD1306_WHITE); // String
-  // Mini Shreya head holding string
-  display.fillCircle(bx + 4, by + 13, 2, SSD1306_WHITE);
+  // Balloon with Shreya (blinks while invulnerable)
+  if (!(invuln && ((now / 100) % 2))) {
+    int bx = 24, byy = (int)flappyY;
+    display.fillCircle(bx + 4, byy + 4, 4, SSD1306_WHITE);   // Balloon
+    display.drawPixel(bx + 3, byy + 2, SSD1306_BLACK);       // Highlight
+    display.drawFastVLine(bx + 4, byy + 8, 4, SSD1306_WHITE);// String
+    display.fillCircle(bx + 4, byy + 13, 2, SSD1306_WHITE);  // Mini Shreya head
+  }
 
-  display.setTextSize(1); display.setCursor(4, 4); display.print("SCR:"); display.print(currentScore);
+  drawLives(4, 4);
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(92, 4);
+  display.print("SCR:");
+  display.print(currentScore);
   display.display();
 }
 
 // ==========================================
-// GAME 3: CLASSIC SNAKE
+// GAME 3: CLASSIC SNAKE (EASY MODE)
 // ==========================================
-int snakeX[64]; int snakeY[64]; int snakeLen = 4; int snakeDir = 0; int foodX = 40, foodY = 30; unsigned long lastSnakeTick = 0;
+// ---- TUNING ----
+const int SNAKE_START_TICK = 170;   // ms per step at the start (was 100)
+const int SNAKE_MIN_TICK   = 100;   // fastest it will ever get
+
+int snakeX[64]; int snakeY[64];
+int snakeLen = 3; int snakeDir = 0;
+int foodX = 40, foodY = 30;
+unsigned long lastSnakeTick = 0;
+int snakeTickMs = SNAKE_START_TICK;
+int turnQ[2]; int turnQn = 0;       // queued turns: left = 3, right = 1
+
+void placeFood() {
+  for (int tries = 0; tries < 30; tries++) {
+    foodX = random(2, 28) * 4;
+    foodY = random(2, 14) * 4;
+    bool onSnake = false;
+    for (int i = 0; i < snakeLen; i++) {
+      if (snakeX[i] == foodX && snakeY[i] == foodY) { onSnake = true; break; }
+    }
+    if (!onSnake) return;
+  }
+}
 
 void initSnake() {
-  snakeLen = 4; snakeDir = 0;
+  snakeLen = 3; snakeDir = 0;
   for (int i = 0; i < snakeLen; i++) { snakeX[i] = 40 - i * 4; snakeY[i] = 32; }
-  foodX = (random(2, 28) * 4); foodY = (random(2, 14) * 4); currentScore = 0;
+  turnQn = 0;
+  snakeTickMs = SNAKE_START_TICK;
+  currentScore = 0;
+  placeFood();
+  lastSnakeTick = millis();
 }
 
 void updateSnake() {
   static bool lastPBtn = HIGH, lastMBtn = HIGH;
   bool pBtn = digitalRead(BUTTON_POWER), mBtn = digitalRead(BUTTON_MODE);
-  if (pBtn == LOW && lastPBtn == HIGH) snakeDir = (snakeDir + 3) % 4; // Turn Left
-  if (mBtn == LOW && lastMBtn == HIGH) snakeDir = (snakeDir + 1) % 4; // Turn Right
+  if (pBtn == LOW && lastPBtn == HIGH && turnQn < 2) turnQ[turnQn++] = 3;  // Turn Left
+  if (mBtn == LOW && lastMBtn == HIGH && turnQn < 2) turnQ[turnQn++] = 1;  // Turn Right
   lastPBtn = pBtn; lastMBtn = mBtn;
 
-  if (millis() - lastSnakeTick > 100) {
-    for (int i = snakeLen - 1; i > 0; i--) { snakeX[i] = snakeX[i - 1]; snakeY[i] = snakeY[i - 1]; }
-    if (snakeDir == 0) snakeX[0] += 4; else if (snakeDir == 1) snakeY[0] += 4;
-    else if (snakeDir == 2) snakeX[0] -= 4; else if (snakeDir == 3) snakeY[0] -= 4;
-
-    if (snakeX[0] < 0 || snakeX[0] >= 128 || snakeY[0] < 0 || snakeY[0] >= 64) {
-      if (currentScore > bestSnake) { bestSnake = currentScore; saveScore("snake", bestSnake); }
-      gameBeforeGameOver = STATE_SNAKE; currentState = STATE_GAMEOVER; return;
+  if (millis() - lastSnakeTick > (unsigned long)snakeTickMs) {
+    // Apply at most ONE queued turn per step (no instant U-turns)
+    if (turnQn > 0) {
+      snakeDir = (snakeDir + turnQ[0]) % 4;
+      turnQ[0] = turnQ[1];
+      turnQn--;
     }
+
+    for (int i = snakeLen - 1; i > 0; i--) { snakeX[i] = snakeX[i - 1]; snakeY[i] = snakeY[i - 1]; }
+    if (snakeDir == 0) snakeX[0] += 4;
+    else if (snakeDir == 1) snakeY[0] += 4;
+    else if (snakeDir == 2) snakeX[0] -= 4;
+    else snakeY[0] -= 4;
+
+    // Walls wrap around instead of killing you
+    if (snakeX[0] < 0)   snakeX[0] = 124;
+    if (snakeX[0] >= 128) snakeX[0] = 0;
+    if (snakeY[0] < 0)   snakeY[0] = 60;
+    if (snakeY[0] >= 64) snakeY[0] = 0;
+
+    // Only hitting yourself ends the game
     for (int i = 1; i < snakeLen; i++) {
       if (snakeX[0] == snakeX[i] && snakeY[0] == snakeY[i]) {
         if (currentScore > bestSnake) { bestSnake = currentScore; saveScore("snake", bestSnake); }
         gameBeforeGameOver = STATE_SNAKE; currentState = STATE_GAMEOVER; return;
       }
     }
-    if (abs(snakeX[0] - foodX) < 4 && abs(snakeY[0] - foodY) < 4) {
+
+    if (snakeX[0] == foodX && snakeY[0] == foodY) {
       if (snakeLen < 60) snakeLen++;
       currentScore += 10;
-      foodX = (random(2, 28) * 4); foodY = (random(2, 14) * 4);
+      snakeTickMs = max(SNAKE_MIN_TICK, SNAKE_START_TICK - (currentScore / 10) * 4);
+      placeFood();
     }
     lastSnakeTick = millis();
   }
 
   display.clearDisplay();
-  display.drawRect(0, 0, 128, 64, SSD1306_WHITE);
+  // Dotted border = "walls wrap around"
+  for (int x = 0; x < 128; x += 4) { display.drawPixel(x, 0, SSD1306_WHITE); display.drawPixel(x, 63, SSD1306_WHITE); }
+  for (int y = 0; y < 64; y += 4)  { display.drawPixel(0, y, SSD1306_WHITE); display.drawPixel(127, y, SSD1306_WHITE); }
+
   display.fillRect(foodX, foodY, 3, 3, SSD1306_WHITE);
   for (int i = 0; i < snakeLen; i++) display.fillRect(snakeX[i], snakeY[i], 3, 3, SSD1306_WHITE);
-  display.setTextSize(1); display.setCursor(4, 2); display.print("S:"); display.print(currentScore);
+
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);   // black bg so the snake never garbles the score
+  display.setCursor(4, 3);
+  display.print("S:");
+  display.print(currentScore);
+  display.setTextColor(SSD1306_WHITE);
   display.display();
 }
 
@@ -1633,7 +1808,7 @@ void loop() {
       }
 
       drawClockWeather();
-      delay(400);
+      delay(250);
       break;
     }
 
