@@ -61,6 +61,8 @@ enum SystemState {
   STATE_FLAPPY,       // Game 2: Flappy Balloon (Dodging Candles)
   STATE_SNAKE,        // Game 3: Classic Snake
   STATE_SECRET,       // Hidden easter egg
+  STATE_WISH,         // Make-a-wish intro
+  STATE_FIREWORKS,    // Fireworks toy
   STATE_GAMEOVER
 };
 
@@ -147,9 +149,11 @@ const char* menuItems[] = {
   "4. Live Clock...",
   "5. Photo Album (10)",
   "6. Home Pic Mode",
+  "7. Make a Wish",
+  "8. Fireworks",
   "< Back to Home"
 };
-const int TOTAL_MENU_ITEMS = 7;
+const int TOTAL_MENU_ITEMS = 9;
 int menuCursor = 0;
 
 // High Scores (Saved to ESP32 Flash NVS)
@@ -598,9 +602,55 @@ void drawBlinkingCuteFace(int centerX, int centerY, int faceType) {
 }
 
 // ==========================================
+// VISUAL HELPERS: sparkle + pixel dissolve
+// ==========================================
+void drawSparkle(int x, int y, int r) {
+  display.drawFastHLine(x - r, y, 2 * r + 1, SSD1306_WHITE);
+  display.drawFastVLine(x, y - r, 2 * r + 1, SSD1306_WHITE);
+}
+
+static uint8_t oldFrame[1024];   // 128x64 / 8
+
+void snapshotFrame() {
+  memcpy(oldFrame, display.getBuffer(), 1024);
+}
+
+static inline uint8_t pixHash(int x, int y, int n) {
+  uint32_t h = (uint32_t)x * 2654435761u ^ (uint32_t)y * 40503u ^ (uint32_t)(x * y) * 97u;
+  h ^= h >> 15;
+  h *= 2246822519u;
+  h ^= h >> 13;
+  return (uint8_t)(h % n);
+}
+
+// The display buffer must already hold the NEW screen (drawn with push=false).
+// oldFrame must hold the previous screen (call snapshotFrame() before drawing).
+void dissolveFrom(const uint8_t* oldF) {
+  uint8_t* buf = display.getBuffer();
+  static uint8_t tgt[1024];
+  memcpy(tgt, buf, 1024);
+  const int STEPS = 12;
+  for (int s = 0; s < STEPS; s++) {
+    for (int i = 0; i < 1024; i++) {
+      int x = i & 127;
+      int page = i >> 7;
+      uint8_t m = 0;                       // 1 = show new pixel
+      for (int b = 0; b < 8; b++) {
+        if (pixHash(x, page * 8 + b, STEPS) <= s) m |= (1 << b);
+      }
+      buf[i] = (tgt[i] & m) | (oldF[i] & ~m);
+    }
+    display.display();
+    delay(10);
+  }
+  memcpy(buf, tgt, 1024);
+  display.display();
+}
+
+// ==========================================
 // 1. IDLE PHOTO SCREEN
 // ==========================================
-void drawIdlePhotoScreen() {
+void drawIdlePhotoScreen(bool push = true) {
   display.clearDisplay();
 
   // Full 64x64 photo, nothing covering it
@@ -619,6 +669,10 @@ void drawIdlePhotoScreen() {
     display.fillCircle(hx + 2, hy, 2, SSD1306_WHITE);
     display.fillTriangle(hx - 4, hy + 1, hx + 4, hy + 1, hx, hy + 5, SSD1306_WHITE);
   }
+
+  // Twinkling sparkles, synced to the heartbeat
+  if (beat) { drawSparkle(76, 6, 2); drawSparkle(118, 14, 1); }
+  else      { drawSparkle(76, 6, 1); drawSparkle(118, 14, 2); }
 
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
@@ -641,7 +695,7 @@ void drawIdlePhotoScreen() {
     display.print("B2:Smiles");
   }
 
-  display.display();
+  if (push) display.display();
 }
 
 // ==========================================
@@ -689,7 +743,7 @@ void drawMessageCard() {
 // ==========================================
 // 3. PHOTO ALBUM (ALL 9 FULL PHOTOS)
 // ==========================================
-void drawPhotoAlbum() {
+void drawPhotoAlbum(bool push = true) {
   display.clearDisplay();
   display.drawBitmap(0, 0, albumBitmaps[photoAlbumIndex], 128, 64, SSD1306_WHITE);
 
@@ -709,7 +763,7 @@ void drawPhotoAlbum() {
   display.setCursor(80, 54);
   display.print("B2:Next");
 
-  display.display();
+  if (push) display.display();
 }
 
 // ==========================================
@@ -1083,6 +1137,262 @@ void updateSnake() {
 }
 
 // ==========================================
+// ALBUM TRANSITION (pixel dissolve)
+// ==========================================
+void albumTransition() {
+  snapshotFrame();
+  drawPhotoAlbum(false);
+  dissolveFrom(oldFrame);
+}
+
+// ==========================================
+// MAKE A WISH (cake, candles, confetti)
+// ==========================================
+int wishPhase = 0;                 // 0 = blowing, 1 = celebration
+unsigned long wishBlow = 0;        // total ms B2 has been held
+unsigned long lastWishTick = 0;
+unsigned long celebStart = 0;
+bool wishBlowing = false;
+bool candleOn[5];
+unsigned long snuffAt[5];
+int cfX[30], cfY[30], cfV[30];
+
+void startWish() {
+  currentState = STATE_WISH;
+  wishPhase = 0;
+  wishBlow = 0;
+  wishBlowing = false;
+  lastWishTick = millis();
+  for (int i = 0; i < 5; i++) { candleOn[i] = true; snuffAt[i] = 0; }
+}
+
+void drawWish() {
+  unsigned long now = millis();
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  const char* msg = ((now / 1600) % 2 == 0) ? "Make a wish!" : "Hold B2 to blow";
+  display.setCursor((128 - (int)strlen(msg) * 6) / 2, 0);
+  display.print(msg);
+
+  // Plate and two cake tiers
+  display.drawFastHLine(24, 60, 80, SSD1306_WHITE);
+  display.drawRect(30, 44, 68, 16, SSD1306_WHITE);
+  display.drawRect(42, 34, 44, 10, SSD1306_WHITE);
+
+  // Wavy icing lines
+  for (int x = 31; x < 97; x++) display.drawPixel(x, 48 + (int)(1.6f * sinf(x * 0.55f)), SSD1306_WHITE);
+  for (int x = 43; x < 85; x++) display.drawPixel(x, 38 + (int)(1.4f * sinf(x * 0.6f + 1.0f)), SSD1306_WHITE);
+  // Sprinkles
+  for (int x = 35; x < 95; x += 6) display.drawPixel(x, 53 + (x % 3), SSD1306_WHITE);
+
+  int lean = wishBlowing ? (1 + (int)((now / 80) % 2)) : 0;
+
+  for (int i = 0; i < 5; i++) {
+    int cx = 48 + i * 8;
+    // Candle with stripes
+    display.fillRect(cx - 1, 27, 3, 7, SSD1306_WHITE);
+    display.drawPixel(cx, 29, SSD1306_BLACK);
+    display.drawPixel(cx, 31, SSD1306_BLACK);
+
+    if (candleOn[i]) {
+      int f = (int)((now / 90 + i) % 3);
+      display.fillCircle(cx + lean, 24, f == 0 ? 2 : 1, SSD1306_WHITE);
+      display.drawPixel(cx + lean, 21 + (f == 2 ? 1 : 0), SSD1306_WHITE);
+    } else if (snuffAt[i] && now - snuffAt[i] < 1400) {
+      unsigned long age = now - snuffAt[i];
+      for (int k = 0; k < 6; k++) {
+        int y = 25 - k * 3 - (int)(age / 90);
+        if (y < 10) continue;
+        int x = cx + (int)(2.0f * sinf(k * 1.1f + age / 130.0f));
+        display.drawPixel(x, y, SSD1306_WHITE);
+      }
+    }
+  }
+  display.display();
+}
+
+void drawCelebration() {
+  unsigned long t = millis() - celebStart;
+  display.clearDisplay();
+
+  for (int i = 0; i < 30; i++) {
+    if (i % 3 == 0) display.fillRect(cfX[i], cfY[i], 2, 2, SSD1306_WHITE);
+    else display.drawPixel(cfX[i], cfY[i], SSD1306_WHITE);
+  }
+
+  // Text has a black background so confetti never hides the letters
+  display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+  display.setTextSize(2);
+  if (t > 100)  { display.setCursor(34, 3);  display.print("HAPPY"); }
+  if (t > 700)  { display.setCursor(16, 22); display.print("BIRTHDAY"); }
+  if (t > 1300) { display.setCursor(22, 41); display.print("SHREYA!"); }
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.display();
+}
+
+void updateWish() {
+  unsigned long now = millis();
+  unsigned long dt = now - lastWishTick;
+  lastWishTick = now;
+
+  if (wishPhase == 0) {
+    wishBlowing = (digitalRead(BUTTON_MODE) == LOW);
+    if (wishBlowing) wishBlow += dt;
+
+    int out = 0;
+    for (int i = 0; i < 5; i++) {
+      if (candleOn[i] && wishBlow > (unsigned long)(i + 1) * 280) {
+        candleOn[i] = false;
+        snuffAt[i] = now;
+      }
+      if (!candleOn[i]) out++;
+    }
+    drawWish();
+
+    if (out == 5 && now - snuffAt[4] > 1500) {
+      wishPhase = 1;
+      celebStart = now;
+      for (int i = 0; i < 30; i++) {
+        cfX[i] = random(0, 128);
+        cfY[i] = random(0, 64);
+        cfV[i] = random(1, 4);
+      }
+    }
+  } else {
+    for (int i = 0; i < 30; i++) {
+      cfY[i] += cfV[i];
+      cfX[i] = (cfX[i] + random(-1, 2) + 128) % 128;
+      if (cfY[i] > 63) { cfY[i] = 0; cfX[i] = random(0, 128); }
+    }
+    drawCelebration();
+
+    if (now - celebStart > 6000) {
+      // Dissolve from the celebration into her home photo
+      snapshotFrame();
+      currentState = STATE_IDLE_PHOTO;
+      holdProgress = 0;
+      drawIdlePhotoScreen(false);
+      dissolveFrom(oldFrame);
+    }
+  }
+}
+
+// ==========================================
+// FIREWORKS (every 4th burst is a heart)
+// ==========================================
+struct Rocket { float x, y, ty; bool active; };
+struct Spark  { float x, y, vx, vy, g; int life; };
+Rocket rockets[3];
+Spark sparks[70];
+int burstCount = 0;
+unsigned long fwStart = 0, lastAutoLaunch = 0;
+
+void startFireworks() {
+  currentState = STATE_FIREWORKS;
+  memset(rockets, 0, sizeof(rockets));
+  memset(sparks, 0, sizeof(sparks));
+  burstCount = 0;
+  fwStart = millis();
+  lastAutoLaunch = millis() - 1200;
+}
+
+void launchRocket() {
+  for (auto &r : rockets) {
+    if (!r.active) {
+      r.x = random(16, 112);
+      r.y = 63;
+      r.ty = random(10, 30);
+      r.active = true;
+      return;
+    }
+  }
+}
+
+void explode(float x, float y) {
+  bool heart = (burstCount++ % 4 == 3);
+  int n = heart ? 22 : 18;
+  int made = 0;
+  float rot = random(0, 628) / 100.0f;
+  for (auto &s : sparks) {
+    if (s.life > 0) continue;
+    float t = made * 6.2832f / n;
+    if (heart) {
+      float st = sinf(t);
+      s.vx = 0.050f * 16.0f * st * st * st;
+      s.vy = -0.050f * (13 * cosf(t) - 5 * cosf(2 * t) - 2 * cosf(3 * t) - cosf(4 * t));
+      s.g = 0;
+      s.life = 26;
+    } else {
+      float sp = random(10, 22) / 10.0f;
+      s.vx = cosf(t + rot) * sp;
+      s.vy = sinf(t + rot) * sp;
+      s.g = 0.05f;
+      s.life = random(18, 30);
+    }
+    s.x = x;
+    s.y = y;
+    if (++made >= n) break;
+  }
+}
+
+void updateFireworks() {
+  static bool lastBtn = HIGH;
+  bool b = digitalRead(BUTTON_MODE);
+  if (b == LOW && lastBtn == HIGH) launchRocket();
+  lastBtn = b;
+
+  if (millis() - lastAutoLaunch > 1500) {
+    lastAutoLaunch = millis();
+    launchRocket();
+  }
+
+  display.clearDisplay();
+
+  // Skyline
+  for (int x = 0; x < 128; x += 9) {
+    int h = 4 + ((x * 7) % 5) * 2;
+    display.fillRect(x, 64 - h, 7, h, SSD1306_WHITE);
+  }
+  // Twinkling stars
+  for (int i = 0; i < 10; i++) {
+    if ((millis() / 300 + i) % 4) display.drawPixel((i * 53) % 128, (i * 17) % 28, SSD1306_WHITE);
+  }
+
+  for (auto &r : rockets) {
+    if (!r.active) continue;
+    r.y -= 1.8f;
+    display.drawPixel((int)r.x, (int)r.y, SSD1306_WHITE);
+    display.drawPixel((int)r.x, (int)r.y + 2, SSD1306_WHITE);
+    display.drawPixel((int)r.x, (int)r.y + 4, SSD1306_WHITE);
+    if (r.y <= r.ty) {
+      r.active = false;
+      explode(r.x, r.y);
+    }
+  }
+
+  for (auto &s : sparks) {
+    if (s.life <= 0) continue;
+    s.x += s.vx;
+    s.y += s.vy;
+    s.vy += s.g;
+    s.life--;
+    if (s.life > 6 || (s.life & 1)) display.drawPixel((int)s.x, (int)s.y, SSD1306_WHITE);
+  }
+
+  if (millis() - fwStart < 3500) {
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+    display.setCursor(13, 0);
+    display.print("B2:Launch B1:Back");
+    display.setTextColor(SSD1306_WHITE);
+  }
+  display.display();
+}
+
+// ==========================================
 // SETUP
 // ==========================================
 void setup() {
@@ -1130,8 +1440,14 @@ void setup() {
     delay(1200);
   }
 
-  currentState = STATE_IDLE_PHOTO;
-  drawIdlePhotoScreen();
+  if (wakeupReason == ESP_SLEEP_WAKEUP_GPIO) {
+    // Woke from deep sleep: straight to her photo
+    currentState = STATE_IDLE_PHOTO;
+    drawIdlePhotoScreen();
+  } else {
+    // Cold boot: play the wish intro
+    startWish();
+  }
 }
 
 // ==========================================
@@ -1290,15 +1606,13 @@ void loop() {
       if (mClicked) {
         photoAlbumIndex = (photoAlbumIndex + 1) % TOTAL_ALBUM_PHOTOS;
         lastSlideTime = millis();
-        wipeToPhoto(photoAlbumIndex);
-        drawPhotoAlbum();
+        albumTransition();
         return;
       }
       if (slideshowOn && millis() - lastSlideTime > SLIDE_INTERVAL) {
         photoAlbumIndex = (photoAlbumIndex + 1) % TOTAL_ALBUM_PHOTOS;
         lastSlideTime = millis();
-        wipeToPhoto(photoAlbumIndex);
-        drawPhotoAlbum();
+        albumTransition();
       }
       break;
     }
@@ -1374,7 +1688,9 @@ void loop() {
             delay(1200);
             drawMenu();
             break;
-          case 6: 
+          case 6: startWish();       break;
+          case 7: startFireworks();  break;
+          case 8:
             currentState = STATE_IDLE_PHOTO;
             drawIdlePhotoScreen();
             break;
@@ -1407,6 +1723,31 @@ void loop() {
       }
       drawSecretPage();
       delay(40);
+      break;
+    }
+
+    case STATE_WISH: {
+      if (pClicked) {
+        // B1 skips straight to the home photo
+        currentState = STATE_IDLE_PHOTO;
+        holdProgress = 0;
+        drawIdlePhotoScreen();
+        return;
+      }
+      updateWish();
+      delay(20);
+      break;
+    }
+
+    case STATE_FIREWORKS: {
+      if (pClicked) {
+        currentState = STATE_MENU;
+        menuCursor = 0;
+        drawMenu();
+        return;
+      }
+      updateFireworks();
+      delay(25);
       break;
     }
 
