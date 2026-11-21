@@ -60,6 +60,7 @@ enum SystemState {
   STATE_DINO,         // Game 1: Dino Run (Shreya Avatar)
   STATE_FLAPPY,       // Game 2: Flappy Balloon (Dodging Candles)
   STATE_SNAKE,        // Game 3: Classic Snake
+  STATE_SECRET,       // Hidden easter egg
   STATE_GAMEOVER
 };
 
@@ -71,6 +72,25 @@ int photoAlbumIndex = 0;
 int homePhotoIndex = 0;
 
 const int TOTAL_ALBUM_PHOTOS = 9;
+
+// Home photo mode: 0..8 = fixed photo, 9 = Photo of the Day
+const int HOME_MODE_DAILY = TOTAL_ALBUM_PHOTOS;
+long lastKnownDay = -1;
+
+// Slideshow
+bool slideshowOn = false;
+unsigned long lastSlideTime = 0;
+const unsigned long SLIDE_INTERVAL = 4500;
+
+// Long-press tracking for B2
+bool modeHold1Fired = false;
+bool modeHold3Fired = false;
+int holdProgress = 0;
+
+// Easter egg
+int secretPage = 0;
+unsigned long secretStart = 0;
+const int TYPE_MS = 45;
 
 const unsigned char* albumBitmaps[TOTAL_ALBUM_PHOTOS] = {
   bitmap_shreya_128x64,
@@ -123,7 +143,7 @@ const char* menuItems[] = {
   "3. Classic Snake",
   "4. Live Clock...",
   "5. Photo Album (9)",
-  "6. Change Home Pic",
+  "6. Home Pic Mode",
   "< Back to Home"
 };
 const int TOTAL_MENU_ITEMS = 7;
@@ -140,8 +160,9 @@ void loadHighScores() {
   bestDino   = prefs.getInt("dino", 0);
   bestFlappy = prefs.getInt("flappy", 0);
   bestSnake  = prefs.getInt("snake", 0);
-  homePhotoIndex = prefs.getInt("homePic", 0);
-  if (homePhotoIndex < 0 || homePhotoIndex >= TOTAL_ALBUM_PHOTOS) homePhotoIndex = 0;
+  homePhotoIndex = prefs.getInt("homePic", HOME_MODE_DAILY);  // default: Photo of the Day
+  lastKnownDay   = prefs.getLong("lastDay", -1);
+  if (homePhotoIndex < 0 || homePhotoIndex > TOTAL_ALBUM_PHOTOS) homePhotoIndex = HOME_MODE_DAILY;
   prefs.end();
 }
 
@@ -149,6 +170,114 @@ void saveScore(const char* key, int val) {
   prefs.begin("shreya", false);
   prefs.putInt(key, val);
   prefs.end();
+}
+
+// ==========================================
+// PHOTO OF THE DAY
+// ==========================================
+int getHomeIndex() {
+  if (homePhotoIndex != HOME_MODE_DAILY) return homePhotoIndex;
+
+  time_t now = time(nullptr);
+  if (now > 1700000000L) {  // clock has been synced via NTP
+    long today = (long)((now + TIME_ZONE_OFFSET) / 86400L);
+    if (today != lastKnownDay) {
+      lastKnownDay = today;
+      prefs.begin("shreya", false);
+      prefs.putLong("lastDay", lastKnownDay);
+      prefs.end();
+    }
+  }
+  if (lastKnownDay < 0) return 0;
+  return (int)(lastKnownDay % TOTAL_ALBUM_PHOTOS);
+}
+
+// ==========================================
+// SLIDESHOW HELPERS
+// ==========================================
+void drawBitmapColumns(const unsigned char* bmp, int x0, int x1) {
+  for (int x = x0; x < x1; x++) {
+    for (int y = 0; y < 64; y++) {
+      bool on = bmp[y * 16 + (x >> 3)] & (0x80 >> (x & 7));
+      display.drawPixel(x, y, on ? SSD1306_WHITE : SSD1306_BLACK);
+    }
+  }
+}
+
+void wipeToPhoto(int newIndex) {
+  const unsigned char* bmp = albumBitmaps[newIndex];
+  for (int x = 0; x < 128; x += 16) {
+    drawBitmapColumns(bmp, x, x + 16);
+    display.display();
+    delay(15);
+  }
+}
+
+void showToast(const char* t) {
+  int w = strlen(t) * 6 + 10;
+  int x = (128 - w) / 2;
+  display.fillRect(x, 20, w, 18, SSD1306_BLACK);
+  display.drawRect(x, 20, w, 18, SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(x + 5, 25);
+  display.print(t);
+  display.display();
+  delay(700);
+}
+
+// ==========================================
+// EASTER EGG: SECRET MESSAGE
+// Max 4 lines per page, max 21 chars per line, NO emojis.
+// ==========================================
+const char* secretPages[] = {
+  "Psst, Shreya...\nyou found the\nsecret screen!",
+  "Every memory\nwe made together\nis gold.",
+  "You make every\nroom brighter\njust by showing up!",
+  "Happy Birthday!\n\n- With Love"
+};
+const int TOTAL_SECRET_PAGES = 4;
+
+void startSecret() {
+  currentState = STATE_SECRET;
+  secretPage = 0;
+  secretStart = millis();
+}
+
+void drawSecretPage() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  display.setCursor(16, 2);
+  display.print("~ just for you ~");
+  display.drawFastHLine(0, 11, 128, SSD1306_WHITE);
+
+  const char* s = secretPages[secretPage];
+  int len = strlen(s);
+  int reveal = (millis() - secretStart) / TYPE_MS;
+
+  int y = 16;
+  display.setCursor(4, y);
+  for (int i = 0; i < len && i < reveal; i++) {
+    if (s[i] == '\n') {
+      y += 10;
+      display.setCursor(4, y);
+    } else {
+      display.print(s[i]);
+    }
+  }
+
+  bool done = reveal >= len;
+  display.fillRect(0, 52, 128, 12, SSD1306_BLACK);
+  display.drawFastHLine(0, 52, 128, SSD1306_WHITE);
+  display.setCursor(4, 54);
+  display.print("B1:Home");
+  display.setCursor(74, 54);
+  if (!done) display.print("B2:Skip");
+  else if (secretPage == TOTAL_SECRET_PAGES - 1) display.print("B2:Close");
+  else display.print("B2:Next");
+  display.display();
 }
 
 // ==========================================
@@ -461,13 +590,13 @@ void drawBlinkingCuteFace(int centerX, int centerY, int faceType) {
 void drawIdlePhotoScreen() {
   display.clearDisplay();
 
-  // Left: Framed 64x64 Photo (full unpadded resolution)
-  display.drawBitmap(0, 0, homeBitmaps[homePhotoIndex], 64, 64, SSD1306_WHITE);
-  display.drawFastVLine(65, 0, 52, SSD1306_WHITE);
+  // Full 64x64 photo, nothing covering it
+  display.drawBitmap(0, 0, homeBitmaps[getHomeIndex()], 64, 64, SSD1306_WHITE);
+  display.drawFastVLine(65, 0, 64, SSD1306_WHITE);
 
-  // Pulsing Heart
+  // Pulsing heart (top of right column)
   bool beat = ((millis() / 450) % 2 == 0);
-  int hx = 96, hy = 10;
+  int hx = 96, hy = 6;
   if (beat) {
     display.fillCircle(hx - 3, hy, 3, SSD1306_WHITE);
     display.fillCircle(hx + 3, hy, 3, SSD1306_WHITE);
@@ -478,21 +607,26 @@ void drawIdlePhotoScreen() {
     display.fillTriangle(hx - 4, hy + 1, hx + 4, hy + 1, hx, hy + 5, SSD1306_WHITE);
   }
 
-  // Text
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(76, 23);
+  display.setCursor(80, 18);
   display.print("HEY");
-  display.setCursor(68, 35);
+  display.setCursor(72, 28);
   display.print("SHREYA!");
 
-  // Bottom prompt bar: Button 1 on LEFT, Button 2 on RIGHT
-  display.fillRect(0, 52, 128, 12, SSD1306_BLACK);
-  display.drawFastHLine(0, 52, 128, SSD1306_WHITE);
-  display.setCursor(4, 54);
-  display.print("B1:Menu");
-  display.setCursor(70, 54);
-  display.print("B2:Smiles");
+  if (holdProgress > 0) {
+    // Easter-egg hold bar, bottom of right column
+    display.setCursor(72, 42);
+    display.print("Hold...");
+    display.drawRect(68, 54, 56, 7, SSD1306_WHITE);
+    display.fillRect(68, 54, (holdProgress * 56) / 120, 7, SSD1306_WHITE);
+  } else {
+    // Button hints in the right column
+    display.setCursor(70, 43);
+    display.print("B1:Menu");
+    display.setCursor(70, 54);
+    display.print("B2:Smiles");
+  }
 
   display.display();
 }
@@ -546,13 +680,17 @@ void drawPhotoAlbum() {
   display.clearDisplay();
   display.drawBitmap(0, 0, albumBitmaps[photoAlbumIndex], 128, 64, SSD1306_WHITE);
 
-  // Bottom prompt bar: Button 1 on LEFT, Button 2 on RIGHT
+  // Brief hint bar overlaid on the photo
   display.fillRect(0, 52, 128, 12, SSD1306_BLACK);
   display.drawFastHLine(0, 52, 128, SSD1306_WHITE);
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(4, 54);
   display.print("B1:Menu");
+  if (slideshowOn) {
+    display.setCursor(49, 54);
+    display.print(">");
+  }
   display.setCursor(55, 54);
   display.print(String(photoAlbumIndex + 1) + "/9");
   display.setCursor(80, 54);
@@ -1027,12 +1165,22 @@ void loop() {
   bool mClicked = false;
   if (mState == LOW && lastModeState == HIGH) {
     modePressTime = millis();
+    modeHold1Fired = false;
+    modeHold3Fired = false;
   }
   if (mState == HIGH && lastModeState == LOW) {
     unsigned long mDur = millis() - modePressTime;
     if (mDur > 30 && mDur < 800) {
       mClicked = true;
     }
+  }
+
+  // B2 long-press detection (1 s and 3 s)
+  bool mLong1 = false, mLong3 = false;
+  unsigned long mHeld = (mState == LOW) ? (millis() - modePressTime) : 0;
+  if (mState == LOW) {
+    if (!modeHold1Fired && mHeld > 1000) { modeHold1Fired = true; mLong1 = true; }
+    if (!modeHold3Fired && mHeld > 3000) { modeHold3Fired = true; mLong3 = true; }
   }
 
   lastPowerState = pState;
@@ -1044,14 +1192,21 @@ void loop() {
   switch (currentState) {
     case STATE_IDLE_PHOTO: {
       if (pClicked) {
-        // Button 1 (Left): Open Menu
+        holdProgress = 0;
         currentState = STATE_MENU;
         menuCursor = 0;
         drawMenu();
         return;
       }
+      if (mLong3) {
+        // Easter egg unlocked!
+        holdProgress = 0;
+        startSecret();
+        drawSecretPage();
+        return;
+      }
       if (mClicked) {
-        // Button 2 (Right): Open Fortune Cookie / Smiles
+        holdProgress = 0;
         currentState = STATE_MESSAGES;
         currentMessageIndex = random(0, TOTAL_MESSAGES);
         lastMessageInteraction = millis();
@@ -1059,8 +1214,17 @@ void loop() {
         return;
       }
 
+      // Progress bar appears after a 0.7 s hold, fills until 3 s
+      if (mState == LOW && mHeld > 700) {
+        long hp = constrain((long)mHeld, 700L, 3000L);
+        holdProgress = map(hp, 700, 3000, 2, 120);
+      } else {
+        holdProgress = 0;
+      }
+
       static unsigned long lastPulse = 0;
-      if (millis() - lastPulse > 450) {
+      unsigned long interval = holdProgress ? 80 : 450;
+      if (millis() - lastPulse > interval) {
         drawIdlePhotoScreen();
         lastPulse = millis();
       }
@@ -1096,17 +1260,32 @@ void loop() {
 
     case STATE_ALBUM: {
       if (pClicked) {
-        // Button 1 (Left): Return to Menu
+        slideshowOn = false;
         currentState = STATE_MENU;
         menuCursor = 0;
         drawMenu();
         return;
       }
-      if (mClicked) {
-        // Button 2 (Right): Next Photo in Album!
-        photoAlbumIndex = (photoAlbumIndex + 1) % TOTAL_ALBUM_PHOTOS;
+      if (mLong1) {
+        // Hold B2 for 1 s: toggle slideshow
+        slideshowOn = !slideshowOn;
+        lastSlideTime = millis();
+        showToast(slideshowOn ? "SLIDESHOW ON" : "SLIDESHOW OFF");
         drawPhotoAlbum();
         return;
+      }
+      if (mClicked) {
+        photoAlbumIndex = (photoAlbumIndex + 1) % TOTAL_ALBUM_PHOTOS;
+        lastSlideTime = millis();
+        wipeToPhoto(photoAlbumIndex);
+        drawPhotoAlbum();
+        return;
+      }
+      if (slideshowOn && millis() - lastSlideTime > SLIDE_INTERVAL) {
+        photoAlbumIndex = (photoAlbumIndex + 1) % TOTAL_ALBUM_PHOTOS;
+        lastSlideTime = millis();
+        wipeToPhoto(photoAlbumIndex);
+        drawPhotoAlbum();
       }
       break;
     }
@@ -1153,11 +1332,13 @@ void loop() {
             break;
           case 4: 
             photoAlbumIndex = 0;
+            slideshowOn = false;
             currentState = STATE_ALBUM;
             drawPhotoAlbum();
             break;
           case 5:
-            homePhotoIndex = (homePhotoIndex + 1) % TOTAL_ALBUM_PHOTOS;
+            // Cycle: photo 1..9, then Photo of the Day, then back to photo 1
+            homePhotoIndex = (homePhotoIndex + 1) % (TOTAL_ALBUM_PHOTOS + 1);
             prefs.begin("shreya", false);
             prefs.putInt("homePic", homePhotoIndex);
             prefs.end();
@@ -1167,9 +1348,15 @@ void loop() {
             display.setTextSize(1);
             display.setTextColor(SSD1306_WHITE);
             display.setCursor(14, 20);
-            display.print("Home Pic Changed:");
-            display.setCursor(16, 34);
-            display.print(photoTitles[homePhotoIndex]);
+            display.print("Home Pic Mode:");
+            display.setCursor(16, 32);
+            if (homePhotoIndex == HOME_MODE_DAILY) {
+              display.print("Photo of the Day");
+              display.setCursor(16, 43);
+              display.print("(new one daily)");
+            } else {
+              display.print(photoTitles[homePhotoIndex]);
+            }
             display.display();
             delay(1200);
             drawMenu();
@@ -1181,6 +1368,32 @@ void loop() {
         }
         return;
       }
+      break;
+    }
+
+    case STATE_SECRET: {
+      if (pClicked) {
+        currentState = STATE_IDLE_PHOTO;
+        holdProgress = 0;
+        drawIdlePhotoScreen();
+        return;
+      }
+      if (mClicked) {
+        int len = strlen(secretPages[secretPage]);
+        if ((int)((millis() - secretStart) / TYPE_MS) < len) {
+          // still typing: skip to full text
+          secretStart = millis() - (unsigned long)len * TYPE_MS;
+        } else if (++secretPage >= TOTAL_SECRET_PAGES) {
+          currentState = STATE_IDLE_PHOTO;
+          holdProgress = 0;
+          drawIdlePhotoScreen();
+          return;
+        } else {
+          secretStart = millis();
+        }
+      }
+      drawSecretPage();
+      delay(40);
       break;
     }
 
